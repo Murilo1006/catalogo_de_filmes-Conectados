@@ -1,77 +1,100 @@
+const db = require('./database');
+
 const express = require("express");
 const cors = require("cors");
-const fs = require("fs");
 
 const app = express();
 
 app.use(express.json());
-
 app.use(cors());
 
-function lerFilmes(){
-const dados = fs.readFileSync("filmes.json");
-return JSON.parse(dados);
-}
 
-function salvarFilmes(filmes){
-
-    fs.writeFileSync(
-        "filmes.json",
-        JSON.stringify(filmes, null, 2)
-    );
-}
-
+// ─── GET /filmes ───
 app.get("/filmes", (req, res) => {
-    const filmes = lerFilmes();
+    const filmes = db.prepare("SELECT * FROM filmes").all();
     res.json(filmes);
 });
 
-app.get("/filmes/:id", (req, res) => {
-    const filmes = lerFilmes();
 
-    const filme = filmes.find(
-        f => f.id == req.params.id
-    );
+// ─── GET /filmes/:id ─── (bônus do material)
+app.get("/filmes", (req, res) => {
 
-    res.json(filme);
+    const { titulo } = req.query;
+
+    let filmes;
+
+    if (titulo) {
+        filmes = db
+            .prepare("SELECT * FROM filmes WHERE titulo LIKE ? ORDER BY ano DESC")
+            .all(`%${titulo}%`);
+    } else {
+        filmes = db
+            .prepare("SELECT * FROM filmes ORDER BY ano DESC")
+            .all();
+    }
+
+    res.json(filmes);
 });
 
+
+// ─── POST /filmes ───
 app.post("/filmes", (req, res) => {
-    const filmes = lerFilmes();
-    const novoFilme = {
-        id: Date.now(),
-        ...req.body
-    };
 
-    filmes.push(novoFilme);
-    salvarFilmes(filmes);
-    res.json(novoFilme);
+    const { titulo, diretor, ano, capa_url } = req.body;
+
+    if (!titulo || !diretor || !ano) {
+        return res.status(400).json({ erro: "Campos obrigatórios faltando" });
+    }
+
+    const stmt = db.prepare(
+        "INSERT INTO filmes (titulo, diretor, ano, capa_url) VALUES (?, ?, ?, ?)"
+    );
+
+    const result = stmt.run(titulo, diretor, Number(ano), capa_url || null);
+
+    res.status(201).json({
+        id: result.lastInsertRowid,
+        titulo,
+        diretor,
+        ano
+    });
 });
 
+
+// ─── PUT /filmes/:id ───
 app.put("/filmes/:id", (req, res) => {
-    const filmes = lerFilmes();
-    const index = filmes.findIndex(
-        f => f.id == req.params.id
+
+    const { titulo, diretor, ano, capa_url } = req.body;
+    const { id } = req.params;
+
+    const stmt = db.prepare(
+        "UPDATE filmes SET titulo=?, diretor=?, ano=?, capa_url=? WHERE id=?"
     );
 
-    filmes[index] = {
-        ...filmes[index],
-        ...req.body
-    };
+    const result = stmt.run(titulo, diretor, Number(ano), capa_url || null, id);
 
-    salvarFilmes(filmes);
-    res.json(filmes[index]);
+    if (result.changes === 0) {
+        return res.status(404).json({ erro: "Filme não encontrado" });
+    }
+
+    res.json({ mensagem: "Filme atualizado com sucesso" });
 });
 
+
+// ─── DELETE /filmes/:id ───
 app.delete("/filmes/:id", (req, res) => {
-    let filmes = lerFilmes();
-    filmes = filmes.filter(
-        f => f.id != req.params.id
-    );
 
-    salvarFilmes(filmes);
-    res.json({mensagem:"Filme excluído"});
+    const result = db
+        .prepare("DELETE FROM filmes WHERE id = ?")
+        .run(req.params.id);
+
+    if (result.changes === 0) {
+        return res.status(404).json({ erro: "Filme não encontrado" });
+    }
+
+    res.json({ mensagem: "Filme excluído com sucesso" });
 });
+
 
 app.listen(3000, () => {
   console.log("Servidor rodando em http://localhost:3000");
